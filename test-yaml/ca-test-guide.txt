@@ -1,0 +1,59 @@
+# cluster autoscaler 설치 후 node의 scale in/out 테스트
+
+0. 테스트하기 위한 노드 그룹을 결정하고 해당 노드 그룹에 Sample APP(php-apache, 노드그룹:ops)을 배포한다.
+  - sample app: php-apache(php-apache.yaml)
+		- node_group: "ops" 레이블이 설정된 노드 그룹
+
+1. sample app 배포
+$ k apply -f php-apache.yaml
+
+2. hpa 설정
+* 빠른 테스트를 위해 cpu-perecnt를 낮추고, max의 개수를 높힌 후 설정
+* 필요에 따라서 여러개의 터미널로 동시에 부하 생성
+$ kubectl autoscale deployment php-apache --cpu-percent=50 --min=1 --max=10
+
+3. busybox를 활용하여 php-apache서비스에 부하를 주입한다.
+$ kubectl run -i --tty load-generator-1 --rm --image=busybox --restart=Never -- /bin/sh -c "while sleep 0.01; do wget -q -O- http://php-apache; done"
+
+4. hpa의 상태 관찰
+$ kubectl get hpa -w
+NAME         REFERENCE               TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+php-apache   Deployment/php-apache   0%/50%    1         10        1          57s
+php-apache   Deployment/php-apache   107%/50%   1         10        1          2m31s
+php-apache   Deployment/php-apache   250%/50%   1         10        3          2m46s
+php-apache   Deployment/php-apache   153%/50%   1         10        5          3m1s
+php-apache   Deployment/php-apache   68%/50%    1         10        5          3m16s
+php-apache   Deployment/php-apache   60%/50%    1         10        5          3m31s
+php-apache   Deployment/php-apache   57%/50%    1         10        5          3m46s
+php-apache   Deployment/php-apache   56%/50%    1         10        6          4m1s
+php-apache   Deployment/php-apache   55%/50%    1         10        6          4m16s
+php-apache   Deployment/php-apache   46%/50%    1         10        7          4m31s
+php-apache   Deployment/php-apache   42%/50%    1         10        7          4m46s
+php-apache   Deployment/php-apache   47%/50%    1         10        7          5m1s
+php-apache   Deployment/php-apache   52%/50%    1         10        7          5m16s
+php-apache   Deployment/php-apache   70%/50%    1         10        7          5m32s
+php-apache   Deployment/php-apache   71%/50%    1         10        10         5m47s
+php-apache   Deployment/php-apache   58%/50%    1         10        10         6m2s
+php-apache   Deployment/php-apache   54%/50%    1         10        10         6m17s
+php-apache   Deployment/php-apache   50%/50%    1         10        10         6m32s
+php-apache   Deployment/php-apache   51%/50%    1         10        10         6m47s
+php-apache   Deployment/php-apache   51%/30%    1         100       10         6m47s
+php-apache   Deployment/php-apache   49%/30%    1         100       10         7m2s
+
+5. 노드의 scale in/out 관찰
+* 부하 주입 후 노드(max)가 생성되는지 확인하고, 부하발생을 중지하고 노드가 desired 상태로 축소되는지 확인
+$ k get nodes -l role=ops
+NAME                                                STATUS   ROLES    AGE   VERSION
+ip-192-168-50-129.ap-northeast-2.compute.internal   Ready    <none>   14m   v1.21.5-eks-9017834
+ip-192-168-57-57.ap-northeast-2.compute.internal    Ready    <none>   43h   v1.21.5-eks-9017834
+ip-192-168-63-43.ap-northeast-2.compute.internal    Ready    <none>   43h   v1.21.5-eks-9017834
+ip-192-168-74-32.ap-northeast-2.compute.internal    Ready    <none>   14m   v1.21.5-eks-9017834
+ip-192-168-76-191.ap-northeast-2.compute.internal   Ready    <none>   43h   v1.21.5-eks-9017834
+
+6. 리소스 정리
+$ kubectl delete hpa/php-apache
+horizontalpodautoscaler.autoscaling "php-apache" deleted
+
+$ kubectl delete -f php-apache.yaml
+deployment.apps "php-apache" deleted
+service "php-apache" deleted
